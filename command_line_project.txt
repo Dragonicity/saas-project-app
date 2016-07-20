@@ -1,0 +1,8 @@
+CREATE APPLICATION
+
+rails new saas-project-app -d postgresql
+bundle install
+rake db:create db:migrate
+
+
+
