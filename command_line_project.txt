@@ -47,3 +47,29 @@ Add the following to config/environments/development.rb
 config.action_mailer.delivery_method = :test
 config.action_mailer.default_url_options = { :host => 'http://localhost:3000' }
 
+Add the following to config/environments/production.rb
+
+config.action_mailer.delivery_method = :smtp
+config.action_mailer.default_url_options = { :host => 'dragon-saas-app.herokuapp.com', :protocol => 'https' }
+
+In app/assets/javascripts/application.js remove tubrolinks and also remove from gemfile and run bundle install.
+
+git add -A
+git commit -m "Add sendmail"
+git push
+git push heroku master
+
+ADD DEVISE AND MILIA (MULTITENANCY)
+
+Add gems to gemfile
+
+gem 'pg'
+gem 'devise'
+gem 'milia'
+
+Remove root from routes.db in config (Milia uses it own)
+rails generate milia:install --org_email='do-not-reply@example.com'
+
+
+
+
