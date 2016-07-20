@@ -69,6 +69,81 @@ gem 'milia'
 
 Remove root from routes.db in config (Milia uses it own)
 rails generate milia:install --org_email='do-not-reply@example.com'
+rake db:migrate
+
+git add -A
+git commit -m "Add devise and milia for multitenancy"
+git push
+git push heroku master
+heroku run rake db:migrate
+
+INSTALL BOOTSTRAP AND ADD STYLING
+
+Add bootstrap gem to gemfile
+gem 'twitter-bootstrap-rails'
+bundle install
+rails generate bootstrap:install static
+Add devise bootstrap views gem to gemfile
+gem 'devise-bootstrap-views'
+bundle install
+rails generate devise:views:locale en
+rails generate devise:views:bootstrap_templates
+
+In app/assets/stylesheets application.css add:
+*= require devise_bootstrap_views
+
+rails generate bootstrap:layout application
+
+In app/helpers/application_helper.rb add twitter bootstrap flash helper code:
+
+ALERT_TYPES = [:success, :info, :warning, :danger] unless const_defined?(:ALERT_TYPES)
+
+  def bootstrap_flash(options = {})
+    flash_messages = []
+    flash.each do |type, message|
+      # Skip empty messages, e.g. for devise messages set to nothing in a locale file.
+      next if message.blank?
+
+      type = type.to_sym
+      type = :success if type == :notice
+      type = :danger  if type == :alert
+      type = :danger  if type == :error
+      next unless ALERT_TYPES.include?(type)
+
+      tag_class = options.extract!(:class)[:class]
+      tag_options = {
+        class: "alert fade in alert-#{type} #{tag_class}"
+      }.merge(options)
+
+      close_button = content_tag(:button, raw("&times;"), type: "button", class: "close", "data-dismiss" => "alert")
+
+      Array(message).each do |msg|
+        text = content_tag(:div, close_button + msg, tag_options)
+        flash_messages << text if msg
+      end
+    end
+    flash_messages.join("\n").html_safe
+  end
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
