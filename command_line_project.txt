@@ -3,6 +3,10 @@ CREATE APPLICATION
 rails new saas-project-app -d postgresql
 bundle install
 rake db:create db:migrate
-
+git init
+git commit -m "Create rails app"
+Create git repository for app
+git remote add origin https://github.com/Dragonicity/saas-project-app.git
+git push -u origin master
 
 
