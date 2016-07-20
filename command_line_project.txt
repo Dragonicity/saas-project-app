@@ -3,10 +3,47 @@ CREATE APPLICATION
 rails new saas-project-app -d postgresql
 bundle install
 rake db:create db:migrate
+
 git init
 git commit -m "Create rails app"
 Create git repository for app
 git remote add origin https://github.com/Dragonicity/saas-project-app.git
 git push -u origin master
 
+Create placeholder homepage:
+rails generate controller home index
+Add route to routes.rb in config directory in place of 'welcome/index'
+root 'home#index'
+
+Add production group in gemfile with rails12_factor
+bundle install
+git add -A
+git commit -m "Make app production ready"
+git push
+
+heroku create
+heroku rename dragon-saas-sapp
+git push heroku master
+
+ADD EMAIL HANDLING
+
+heroku addons:create sendgrid:starter
+Update  heroku username and password if needed
+
+Add to config/environment.rb
+
+ActionMailer::Base.smtp_settings = {
+  :address        => 'smtp.sendgrid.net',
+  :port           => '587',
+  :authentication => :plain,
+  :user_name      => ENV['SENDGRID_USERNAME'],
+  :password       => ENV['SENDGRID_PASSWORD'],
+  :domain         => 'heroku.com',
+  :enable_starttls_auto => true
+}
+
+Add the following to config/environments/development.rb
+
+config.action_mailer.delivery_method = :test
+config.action_mailer.default_url_options = { :host => 'http://localhost:3000' }
 
