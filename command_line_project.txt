@@ -399,10 +399,235 @@ Add link to invite members in navigation view/laytouts/application.html.erb:
   </li>
 <% end %>
 
+PROJECTS
 
+rails generate scaffold project title:string details:string expected_end_date:date tenant:belongs_to
 
+rake db:migrate
 
+Create nested project routes within tenant in routes.db
 
+resources :tenants do
+  resources :projects
+end
+
+Add Bootstrap to Project views:
+rails generate bootstrap:themed Projects
+
+Update projects index.html.erb:
+
+Make it a partial 
+
+%- model_class = Project -%>
+<div class="page-header">
+  <h1><%=t '.title', :default => model_class.model_name.human.pluralize.titleize %></h1>
+</div>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th><%= model_class.human_attribute_name(:title) %></th>
+      <th><%= model_class.human_attribute_name(:details) %></th>
+      <th><%= model_class.human_attribute_name(:expected_end_date) %></th>
+      <th><%=t '.actions', :default => t("helpers.actions") %></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @projects.each do |project| %>
+      <tr>
+        <td><%= link_to project.title, 
+          tenant_project_path(project, tenant_id: @tenant.id), class: 'main-link' %></td>
+        <td><%= project.details %></td>
+        <td><%= project.expected_end_date %></td>
+        <td>
+          <%= link_to t('.edit', :default => t("helpers.links.edit")),
+                      edit_tenant_project_path(project, tenant_id: @tenant.id), :class => 'btn btn-default btn-xs' %>
+          <%= link_to t('.destroy', :default => t("helpers.links.destroy")),
+                      tenant_project_path(project, tenant_id: @tenant.id),
+                      :method => :delete,
+                      :data => { :confirm => t('.confirm', :default => t("helpers.links.confirm", :default => 'Are you sure?')) },
+                      :class => 'btn btn-xs btn-danger' %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<%= link_to 'New Project', new_tenant_project_path(tenant_id: @tenant.id),
+            :class => 'btn btn-primary' %>
+
+Make link_to path changes as above in other project views.
+
+in _form.html.erb:
+
+<%= form_for @[@tenant, @project], :html => { :class => "form-horizontal project" } do |f| %>
+
+<br />
+<%= f.hidden_field :tenant_id, value: params[:tenant_id], :class => 'form-control' %>
+
+<div class="form-group">
+  <div class="col-lg-offset-2 col-lg-10">
+    <%= f.submit nil, :class => 'btn btn-primary' %>
+    <%= link_to t('.cancel', :default => t("helpers.links.cancel")),
+                root_path, :class => 'btn btn-default' %>
+  </div>
+</div>
+
+Remove tenant_if control group above this.
+Make expected_end_date a date picker:
+
+<%= f.text_field :expected_end_date, :class => 'form-control datepicker' %>
+
+Add gem to gemfile:
+
+gem 'bootstrap-datepicker-rails'
+
+bundle install
+
+Add line to application.css
+
+*= require bootstrap-datepicker3
+
+Add line to application.js
+
+//= require bootstrap-datepicker
+
+Create datepicker.js file:
+
+$(document).ready(function() {
+  $(function() {
+    $('.datepicker').datepicker({format: 'yyyy-mm-dd'});
+  });
+};
+
+Add styling to custom.css.scss
+
+.table tr td {
+  a.main-link {
+    color: #428bca;
+  }
+  a.main-link.hover {
+  background: none;
+  }
+}
+
+Add validations and relationships to models:
+
+class Project < ActiveRecord::Base
+  belongs_to :tenant
+  validates_uniqueness_of :title
+  validate :free_plan_can_only_have_one_project
+
+  def free_plan_can_only_have_one_project
+    if self.new_record? && (tenant.projects.count > 0) && (tenant.plan == 'free')
+      errors.add(:base, "Free plans cannot have more than one project")
+    end
+  end
+end
+
+In tenant.rb add
+has_many :projects, dependent: :destroy
+
+Add placeholder to retrieve projects by plan and project in projects.rb
+
+def self.by_plan_and_tenant(tenant_id)
+  tenant = Tenant.find(tenant_id)
+  if tenant.plan == 'premium'
+    tenant.projects
+  else
+    tenant.projects.order(:id).limit(1)
+  end
+end
+
+Change controllers:
+
+Add 2nd line to home.controller.rb
+
+@tenant = Tenant.current_tenant
+@projects = Project.by_user_plan_and_tenant(@tenant.id)
+
+In projects_controller.rb
+
+Add before_actions and associated methods
+
+before_action :set_tenant, only: [:show, :edit, :update, :destroy, :new, :create]
+before_action :verify_tenant
+
+def set_tenant
+  @tenant = Tenant.find(params[:tenant_id])
+end
+
+def verify_tenant
+  unless params[:tenant_id] == Tenant.current_tenant_id.to_s
+    redirect_to :root, flash { error: "You are not authorised to access any organisation other than your own" }
+  end
+end
+
+Then redirect path methods: change references to project_url to root_url.
+
+Add helper method to application_helper.rb
+
+def tenant_name(tenant_id)
+  Tenant.find(tenant_id).name
+end
+
+Modify show project view
+
+<%- model_class = Project -%>
+<div class="page-header">
+  <h3><%= @project.title %></h3>
+  <h3><small>Organisation - <%= tenant_name @project.tenant_id %></small></h3>
+</div>
+
+<dl class="dl-horizontal">
+  <dt><strong><%= model_class.human_attribute_name(:title) %>:</strong></dt>
+  <dd><%= @project.title %></dd>
+  <dt><strong><%= model_class.human_attribute_name(:details) %>:</strong></dt>
+  <dd><%= @project.details %></dd>
+  <dt><strong><%= model_class.human_attribute_name(:expected_end_date) %>:</strong></dt>
+  <dd><%= @project.expected_end_date %></dd>
+  <dt><strong><%= model_class.human_attribute_name(:tenant_id) %>:</strong></dt>
+  <dd><%= @project.tenant_id %></dd>
+</dl>
+
+<%= link_to '< Back to organisation home', root_path, :class => 'btn btn-default'  %>
+<%= link_to t('Edit', :default => t("helpers.links.edit")),
+              edit_tenant_project_path(project: @project, tenant: @project.tenant_id), :class => 'btn btn-default' %>
+<%= link_to t('.destroy', :default => t("helpers.links.destroy")),
+              tenant_project_path(@project, @project.tenant_id),
+              :method => 'delete',
+              :data => { :confirm => t('.confirm', :default => t("helpers.links.confirm", :default => 'Are you sure?')) },
+              :class => 'btn btn-danger' %>
+
+List projects on homepage
+
+<% if current_user %>
+  <h3 class="pull-right">Organisation: <%= @tenant.name %></h3>
+  <%= render 'projects/list' %>
+<% else %>
+
+Restrict project new button based on plan
+
+Display table only if projects:
+
+<% if @projects.size > 0 %> around <table></table>
+
+abnd at end of file:
+
+<% else %>
+  <p class="lead">You don't have any projects</p>
+<% end %>
+
+<% if @tenant.can_create_projects? %>
+  <%= link_to 'New Project', 
+    new_tenant_project_path(tenant_id: @tenant.id), 
+    :class => 'btn btn-primary' %>
+<% end %>
+
+Put new mthod in tenant.rb
+
+def can_create_projects?
+  (plan == 'free' && projects.count < 1) || (plan == 'premium')
+end
 
 
 
