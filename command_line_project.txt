@@ -629,20 +629,178 @@ def can_create_projects?
   (plan == 'free' && projects.count < 1) || (plan == 'premium')
 end
 
+ARTIFACTS
+
+rails generate scaffold Artifact name:string key:string project:belongs_to
+
+rake db:migrate
+
+Add to project.rb
+
+has_many :artifacts, dependent: :destroy
+
+Add to artifact.rb
+
+class Artifact < ActiveRecord::Base
+  attr_accessor :upload
+  belongs_to :project
+
+  MAX_FILESIZE = 10.megabytes
+  validates_presence_of :name, :upload
+  validates_uniqueness_of :name
+
+  validate :uploaded_file_size
 
 
+  private
 
+  def  uploaded_file_size
+    if upload
+      errors.add(:upload, "File size must be less than #{self.class::MAX_FILESIZE}") 
+        unless upload.size <= self.class::MAX_FILESIZE
+    end
+  end
+end
 
+Add gem to gemfile
 
+gem 'aws-sdk'
 
+bundle install
 
+Create S3 bucket
+Use policy generator to remove accedd denied restriciton on bucket (action GetObject)
 
+{
+  "Id": "Policy1469086992616",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1469086864219",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:s3:::dragonproject/*",
+      "Principal": {
+          "AWS": ["*"]
+    }
+  ]
+}
 
+In management comnsole under permissions select Add bucket policy and paste the generated policy.
 
+Set keys on Heroku as for photo-app
 
+Add to artifact.rb
 
+before_save :upload_to_s3
 
+def upload_to_s3
+  s3 = Aws::S3::Resource.new
+  tenant_name = Tenant.find(Thread.current[:tehant_id]).name
+  obj = s3.bucket(ENV['AWS_S3_BUCKET']).object("#{tenant_name}/#{upload.original_filename}")
+  obj.upload_file(upload.path, acl:'public-read')
+  self.key = obj.public_url
+end
 
+rails generate bootstrap:themed Artifacts
 
+Clone artifacts/index.html.erb to _list.html.erb and change to:
+
+<%- model_class = Artifact -%>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th><%= model_class.human_attribute_name(:name) %></th>
+      <th><%= model_class.human_attribute_name(:key) %></th>
+      <th><%=t '.actions', :default => t("helpers.actions") %></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% artifacts.each do |artifact| %>
+      <tr>
+        <td><%= link_to artifact.name, artifact_path(artifact), class: 'main-link' %></td>
+        <td><%= s3_link Tenant.current_tenant_id, artifact.key %></td>
+        <td>
+          <%= link_to t('.destroy', :default => t("helpers.links.destroy")),
+                      artifact_path(artifact),
+                      :method => :delete,
+                      :data => { :confirm => t('.confirm', :default => t("helpers.links.confirm", :default => 'Are you sure?')) },
+                      :class => 'btn btn-xs btn-danger' %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<%= link_to 'New Artifact', new_artifact_path(project_id: @project.id),
+            :class => 'btn btn-primary' %>
+
+Add s3_link method to application_helper.rb
+
+def s3_link(tenant_id, artifact_key)
+  link_to artifact_key, "#{artifact_key}", class: "main-link, target: 'new'
+end
+
+Change index.html.erb to be:
+
+<%= render 'artifacts/list', artifacts: @project.artifacts %>
+
+and also add this to projects show.html.erb before buttons
+
+<h3>Artifacts</h3>
+<%= render 'artifacts/list', artifacts: @project.artifacts %>
+<br />
+<br />
+
+Change _form.html.erb to be:
+
+<%= form_for @artifact, :html => { :class => "form-horizontal artifact" } do |f| %>
+
+  <% if @artifact.errors.any? %>
+    <div id="error_expl" class="panel panel-danger">
+      <div class="panel-heading">
+        <h3 class="panel-title"><%= pluralize(@artifact.errors.count, "error") %> prohibited this artifact from being saved:</h3>
+      </div>
+      <div class="panel-body">
+        <ul>
+        <% @artifact.errors.full_messages.each do |msg| %>
+          <li><%= msg %></li>
+        <% end %>
+        </ul>
+      </div>
+    </div>
+  <% end %>
+
+  <div class="form-group">
+    <%= f.label :name, :class => 'control-label col-lg-2' %>
+    <div class="col-lg-10">
+      <%= f.text_field :name, :class => 'form-control' %>
+    </div>
+  </div>
+  <div class="form-group">
+    <%= f.label :upload, value: 'File to upload', :class => 'control-label col-lg-2' %>
+    <div class="col-lg-10">
+      <%= f.file_field :upload, :class => 'form-control' %>
+    </div>
+  </div>
+  <%= f.hidden_field :project_id %>
+  <%= f.submit nil, :class => 'btn btn-primary' %>
+  <%= link_to t('.cancel', :default => t("helpers.links.cancel")),
+      tenant_project_path(tenant_id: Tenant.current_tenant_id, 
+      id: @artifact.project_id), :class => 'btn btn-default' %>
+<% end %>
+
+In artifacts_controller.rb
+
+Change params whitelisting:
+
+def artifact_params
+  params.require(:artifact).permit(:name, :project_id, :upload)
+end
+
+Make other path changes as per notes.
 
 
