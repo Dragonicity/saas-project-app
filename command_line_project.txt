@@ -125,7 +125,280 @@ ALERT_TYPES = [:success, :info, :warning, :danger] unless const_defined?(:ALERT_
     flash_messages.join("\n").html_safe
   end
 
-  
+  In config/initializers/milia.rb set the following to false:
+
+  config.use_coupon = false
+  config.use_recaptcha = false
+
+Set session tenant id in home controller index action:
+
+def index
+  if current_user
+    if session[:tenant_id]
+      Tenant.set_current_tenant session[:tenant_id]
+    else
+      Tenant.set_current_tenant curent_user.tenants.first
+    end
+
+    @tenant = Tenant.current_tenant
+    params[:tenant_id] = @tenant.id
+  end
+end
+
+Restart rails server to pick up changes
+
+BUILD HOMEPAGE AND ADD STYLING
+
+Change app/views/layouts/application.html.erb adding coce after links:
+
+<ul class="nav navbar-right col-md-4">
+  <% if current_user %>
+    <li class="col-md-8 user-name">
+    <%= link_to ('<i class="fa fa-user"></i> ' + truncate(current_user.email, length: 25)).html_safe, edit_user_registration_path, title: 'Edit Profile' %>
+    </li>
+    <li class="col-md-1"> </li>
+    <li class="col-md-3 logout"><%= link_to('Logout', destroy_user_session_path, class: 'btn btn-xs btn-danger', title: 'Logout', :method => :delete) %></li>
+  <% else %>
+    <li class="col-md-4 pull-right">
+    <%= link_to('Sign In', new_user_session_path, class: 'btn btn-primary', title: 'Sign In') %>
+    </li>
+  <% end %>
+</ul>
+
+Also, remove sidebar block from this file and links.
+
+Create app/assets/stylesheets/custom.css.scss and include the 1st 63 lines from photo-app file. Add image to app/assets/image referred to in custom css file.
+
+Edit views/home/index.html.erb and include text as per photo-app with apt changes.
+
+PLANS
+
+Add plan attribute to tenant:
+rake db:migrate
+
+
+Add class Plan (does not inherit from ActiveRecord::Base as we will not have plans table)
+
+class Plan
+
+  PLANS = [:free, :premium]
+
+  def self.options
+    PLANS.map { |plan| [plan.capitalize, plan] }
+  end
+
+end
+
+In config/initializers/milia.rb uncomment whitelist temant params and add plan
+config.whitelist_tenant_params = [:plan]
+
+In tenant model add name validation and generalise tenant oparameters:
+validates_uniqueness_of :name
+validates_presence_of :name
+tenant = Tenant.new(tenant_params) - was name only before
+
+Add organisation and oplan fields to user sign_up form:
+
+<%= fields_for(:tenant) do |w| %>
+  <div class="form-group col-md-6 no-left-padding">
+    <%= w.label :name, 'Organisation' %>
+    <span class="description">(Unique name for organsation for the new account)</span>
+    <%= w.text_field :name, required: true, class: "form-control" %>
+  </div>
+  <div class="form-group col-md-6 no-right-padding">
+    <%= w.label :plan %>
+    <%= w.select :plan, options_for_select(Plan.options, params[:plan]), {}, required: true, class: "form-control" %>
+  </div>
+<% end %>
+
+Add styling in custom css file:
+
+.no-left-padding {
+  padding-left: 0 !important;
+}
+
+.no-right-padding {
+  padding-right: 0 !important;
+}
+
+Add confirmations controller (want to override default Milia confirmations)
+
+class ConfirmationsController < Milia::ConfirmationsController
+
+  def update
+    if @confirmable.attempt_set_password(user_params)
+
+    # this section is patterned off of devise 3.2.5 confirmations_controller#show
+
+    self.resource = resource_class.confirm_by_token(params[:confirmation_token])
+    yield resource if block_given?
+      if resource.errors.empty?
+        log_action( "invitee confirmed" )
+        set_flash_message(:notice, :confirmed) if is_flashing_format?
+        # sign in automatically
+        sign_in_tenanted_and_redirect(resource)
+          
+      else
+        log_action( "invitee confirmation failed" )
+        respond_with_navigational(resource.errors, :status => :unprocessable_entity){ render :new }
+      end
+    else
+      log_action( "invitee password set failed" )
+      prep_do_show()  # prep for the form
+      respond_with_navigational(resource.errors, :status => :unprocessable_entity){ render :show }
+    end  # if..then..else passwords are valid
+  end
+
+  def show
+    if @confirmable.new_record?  ||
+       !::Milia.use_invite_member || 
+       @confirmable.skip_confirm_change_password
+
+      log_action( "devise pass-thru" )
+      self.resource = resouce_class.confirm_by_token(params[:confirmation_token])
+      yield resource if block_given?
+      if resource_errors.empty?
+        set_flash_message(:notice, :confirmed) if is_flashing_format?
+      end
+      if @confirmable.skip_confirm_change_password
+        sign_in_tenanted_and_redirect(resource)
+      end
+    else
+      log_action( "password set form" )
+      flash[:notice] = "Please choose a password andconfirm it"
+      prep_do_show()  # prep for the form
+    end
+    # else fall thru to show template which is form to set a password
+    # upon SUBMIT, processing will continue from update
+  end
+
+  def after_confirmation_path_for(resource_name, resource)
+    if user_signed_in?
+      root_path
+    else
+      new_user_session_path
+    end
+  end
+
+  private
+
+  def set_confirmable()
+    @confirmable = User.find_or_initialize_with_error_by(:confirmation_token, params[:confirmation_token])
+  end
+
+end
+
+Change two instances of milia/confirmations to confirmations in routes.db
+
+Clone views/devise/new.html.erb to show.html.erb and make changes to produce below:
+
+<%= bootstrap_devise_error_messages! %>
+<div class="panel panel-default devise-bs">
+  <div class="panel-heading">
+    <h4>Create Password</h4>
+  </div>
+  <div class="panel-body">
+    <%= form_for(resource, :as => resource_name, :url => update_user_confirmation_path, 
+      :html => { :method => :put, :class => "form login" }) do |f| %>
+      <%= hidden_field_tag :confirmation_token, @confirmation_token %>
+      <div class="form-group">
+        <%= f.label :password, :class => "control-label" %>
+        <%= f.password_field :password, class => "form-control"  %>
+      </div>
+      <div class="form-group">
+        <%= f.label :password_confirmation, :class => "control-label" %>
+        <%= f.password_field :password_confirmation, class => "form-control"  %>
+      </div>
+      <%= f.submit 'Create Password', class: "btn btn-primary" %>
+    <% end %>
+  </div>
+</div>
+
+Update views/devise/mailer/confirmation_instructions.html.erb file to use right url (with token):
+
+<p><%= link_to t('.action', :default => "Confirm my account"),
+  user_confirmation_url(:confirmation_token => @token, locale: I18n.locale) %></p>
+
+
+Replace contents of app/view/members/net.html.haml with:
+
+<%- model_class = Member -%>
+
+<div class="page-header">
+  <h1><%=t '.title', :default => [:'helpers.titles.new', 'Invite New %{model}'], :model => model_class.model_name.human.titleize %></h1>
+</div>
+<%= form_for(@member, :html => { :class => "form login" }) do |f| %>
+  <% if @member.errors.any? %>
+    <div id="error_expl" class="panel panel-danger">
+      <div class="panel-heading">
+        <h3 class="panel-title"><%= pluralize(@member.errors.count, "error") %> prohibited this Member from being saved:</h3>
+      </div>
+      <div class="panel-body">
+        <ul>
+          <% @member.errors.full_messages.each do |msg| %>
+            <li><%= msg %></li>
+          <% end %>
+        </ul>
+      </div>
+    </div>
+  <% end %>
+  <% if @user.errors.any? %>
+    <div id="error_expl" class="panel panel-danger">
+      <div class="panel-heading">
+        <h3 class="panel-title"><%= pluralize(@user.errors.count, "error") %> prohibited this Member from being saved:</h3>
+      </div>
+      <div class="panel-body">
+        <ul>
+          <% @user.errors.full_messages.each do |msg| %>
+            <li><%= msg %></li>
+          <% end %>
+        </ul>
+      </div>
+    </div>
+  <% end %>
+  <%= fields_for( :user ) do |w| %>
+    <div class="control-group">
+      <%= w.label :email, :class => "control-label" %>
+      <div class="controls">
+        <%= w.text_field :email, :class => 'form-control' %>  
+      </div>
+    </div>
+  <% end %>
+  <div class="control-group">
+    <%= f.label :first_name, :class => "control-label" %>
+    <%= f.text_field :first_name, :class => "form-control" %>
+  </div>
+  <div class="control-group">
+    <%= f.label :last_name, :class => "control-label" %>
+    <%= f.text_field :last_name, :class => "form-control" %>
+  </div>
+  <br />
+  <div class="control-group">
+    <button class="btn btn-primary" type="submit">
+      Create user and invite
+    </button>
+  </div>
+<% end %>
+
+Update following in config/initializers/devise.rb:
+
+uncomment the line:
+config.mailer = 'Devise::Mailer'
+uncomment the line (and change 2.days to 0.days):
+config.allow_unconfirmed_access_for = 0.days
+uncomment the lines:
+config.confirm_within = 3.days
+config.confirmation_keys = [:email]
+
+Add link to invite members in navigation view/laytouts/application.html.erb:
+
+<% if current_user %>
+  <li>
+    <%= link_to "<i class='fa fa-users'></i> Add Members".html_safe,
+        new_member_path, class: 'navbar-link btn btn-primary' %>
+  </li>
+<% end %>
+
 
 
 
