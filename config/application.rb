@@ -4,8 +4,6 @@ require 'rails/all'
 
 require 'carrierwave'
 
-config.autoload_paths += "#{Rails.root}/app/uploaders"
-
 # Require the gems listed in Gemfile, including any gems
 # you've limited to :test, :development, or :production.
 Bundler.require(*Rails.groups)
