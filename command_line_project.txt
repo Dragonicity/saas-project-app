@@ -803,4 +803,89 @@ end
 
 Make other path changes as per notes.
 
+PAYMENTS
+
+Install stripe gem
+
+gem 'stripe'
+
+bundle install
+
+Add keys to Heroku
+
+heroku config:set STRIPE_TEST_SECRET_KEY=
+heroku config:set STRIPE_TEST_PUBLISHABLE_KEY=
+
+Set upstripe.rb initializer
+
+Rails.configuration.stripe = {
+  :publishable_key => ENV['STRIPE_TEST_PUBLISHABLE_KEY'],
+  :secret_key      => ENV['STRIPE_TEST_SECRET_KEY']
+}
+
+Stripe.api_key = Rails.configuration.stripe[:secret_key]
+
+Set up payment model
+
+rails generate model payment email:string token:string tenant:belongs_to
+
+rake db:migrate
+
+Set-up model:
+
+class Payment < ActiveRecord::Base
+  attr_accessor :card_number, :card_cvv, :card_expires_month, :card_expires_year
+
+  belongs_to :user
+
+  def self.month_options
+    Date::MONTHNAMES.compact.each_with_index.map { |name, i| ["#{i+1} - #{name}", i+1]}
+  end
+
+  def self.year_options
+    (Date.today.year..(Date.today.year+10)).to_a
+  end
+    
+  def process_payment
+    customer = Stripe::Customer.create email: email, card: token
+
+    Stripe::Charge.create customer: customer.id,
+                          amount: 1000,
+                          description: 'Premium',
+                          currency: 'usd'
+  end
+
+end
+
+Add to tenant model file
+
+has_one :payment
+accepts_nested_attributes_for :payment
+
+Add stripe javascript to application.html.erb layout:
+
+<%= javascript_include_tag "https://js.stripe.com/v2/" %>
+
+In devise/registrations/new.html.erb include registration code:
+
+<script language="Javascript">
+  Stripe.setPublishableKey("<%= ENV['STRIPE_TEST_PUBLISHABLE_KEY'] %>");
+</script>
+
+Now add form fields for credit cards to this view as per photo app.
+
+Create credit-Card_form.js in assets/javascripts as per photo app with additions to manage plans.
+
+provide edit tenant view to allow change of plans
+
+
+
+
+
+
+
+
+
+
+
 
