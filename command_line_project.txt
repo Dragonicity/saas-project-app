@@ -876,11 +876,241 @@ Now add form fields for credit cards to this view as per photo app.
 
 Create credit-Card_form.js in assets/javascripts as per photo app with additions to manage plans.
 
-provide edit tenant view to allow change of plans
+provide edit tenant view to allow change of plans (custom registrations)
+
+update routes file to accept registrations (remove milia/)
+
+Copy milia registrations controller and amend to create payment in create method if plan is premium (see listing).
+
+Add token to whitelist in milia initializers
+
+config.whitelist_tenant_params = [:plan, :token]
+
+Edit existing plans:
+
+Add to routes.rb
+
+match '/plan/edit' => 'tenants#edit', via: :get, as: :edit_plan
+match '/plan/update' => 'tenants#update', via: [:put, :patch], as: :update_plan
+
+Add tenants_controller and edit method:
+
+class TenantsController < ApplicationController
+
+  before_action :set_tenant
+
+  def edit
+  end
+
+  private
+
+    def set_tenant
+      @tenant = Tenant.find(Tenant.current_tenant_id)
+    end
+end
+
+Add views/tenants folder and edit template:
 
 
 
+Add method to application helper
 
+def class_name_for_tenant_form(tenant)
+    return "cc_form" if tenant.payment.blank?
+    ""
+end
+
+<script language="Javascript">
+  Stripe.setPublishableKey("<%= ENV['STRIPE_TEST_PUBLISHABLE_KEY'] %>");
+</script>
+
+<%= form_for @tenant, url: update_plan_path, html: { class: "#{class_name_for_tenant_form(@tenant)}"} do |f| %>
+
+  <div class="form-group col-md-12 no-left-padding">
+    <%= f.label :name, 'Organization' %>
+    <span class='description'>(Unique name for group or organization)</span>
+    <%= f.text_field :name, required: true, class: "form-control" %>
+  </div>
+  <% if @tenant.payment.blank? %>
+    <%= fields_for( :payment ) do |p| %>
+      <div class="row col-md-12">
+        <div class="form-group col-md-4 no-left-padding">
+          <%= p.label :card_number, "Card Number", data: { stripe: 'label'} %>
+          <%= p.text_field :card_number, class: "form-control", required: true, data: { stripe: 'number'} %>
+        </div>
+        <div class="form-group col-md-2">
+          <%= p.label :card_cvv, "Card CVV", data: { stripe: 'label'} %>
+          <%= p.text_field :card_cvv, class: "form-control", required: true, data: { stripe: 'cvv'} %>
+        </div>
+        <div class="form-group col-md-6">
+        <div class="col-md-12">
+            <%= p.label :card_expires, "Card Expires", data: { stripe: 'label'} %>
+        </div>
+        <div class="col-md-3">
+          <%= p.select :card_expires_month, options_for_select(Payment.month_options), 
+                        { include_blank: 'Month'},
+                        "data-stripe" => "exp-month",
+                        class: "form-control", required: true %>
+        </div>
+        <div class="col-md-3">
+          <%= p.select :card_expires_year, options_for_select(Payment.year_options.push), 
+                        { include_blank: 'Year'},
+                        class: "form-control", 
+                         data: { stripe: "exp-year" }, required: true %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+  <br />
+  <div class="row col-md-12">
+    <%= f.submit "Update Plan", class: "btn btn-primary", id: 'update_plan' %>
+<% end %>
+
+Add update method to tenants controller
+
+class TenantsController < ApplicationController
+
+  before_action :set_tenant
+
+  def edit
+  end
+
+  def update
+    respond_to do |format|
+      @tenant.transaction do
+        if @tenant.update(tenant_params)
+          if @tenant.plan == "premium" && @tenant.payment.blank?
+
+            @payment = Payment.new({email: tenant_params["email"],
+              token: params[:payment]["token"],
+              tenant_id: @tenant})
+            begin
+              @payment.process_payment
+              @payment.save
+            rescue Exception => e
+              flash[:error] = e.message
+              @payment.destroy
+              @tenant.plan = "free"
+              @tenant.save
+              redirect_to edit_tenant_path(@tenant) and return
+            end
+          end
+          format.html { redirect_to edit_plan_path, notice: "Plan updated"}
+        else
+          format.html { render :edit }
+        end
+      end
+    end
+  end
+
+  def change
+    @tenant = Tenant.find(params[:id])
+    Tenant.set_current_tenant @tenant.id
+    session[:tenant_id] = Tenant.current_tenant.id
+    redirect_to home_index_path, notice: "SWitched to organisation #{@tenant.name}"
+  end
+
+  private
+
+    def set_tenant
+      @tenant = Tenant.find(Tenant.current_tenant_id)
+    end
+
+    def tenant_params
+      params.require(:tenant).permit(:name, :plan)
+    end
+end
+
+Set first user to admin for organisation
+
+rails generate migration add_is_admin_to_users is_admin:boolean
+
+class AddIsAdminToUsers < ActiveRecord::Migration
+  def change
+    add_column :users, :is_admin, :boolean, default: false
+  end
+end
+
+rake db:migrate
+
+add mthod to user.rb
+
+def is_admin?
+  is_admin
+end
+
+Make user signign up as is_admin true in registrations_controller
+
+user_params = sign_up_params_user.merge({ is_admin: true })
+
+CLEAN UP VIEWS
+
+create nav partial in views/common new folder and extract navigation code from layout/application.html.erb
+
+Association between users and projects:
+
+rails generate scaffold UserProject project:belongs_to user:belongs_to
+
+rake db:migrate
+
+rails generate bootstrap:themed UserProjects
+
+Add to user.rb
+
+has_many :user_projects
+has_many :projects, through::user_projects
+
+Add to projects.rb:
+
+has_many :user_projects
+has_many :users, through::user_projects
+
+Change home_controller:
+
+@projects = Project.by_user_plan_and_tenant(@tenant.id, current_user)
+
+Change projects_controller:
+Index
+@projects = Project.by_user_plan_and_tenant(params[:tenant_id], current_user)
+Create
+@project.users << current_user
+
+Make before_actions:
+
+before_action :set_project, only: [:show, :edit, :update, :destroy, :users, :add_user]
+before_action :set_tenant, only: [:show, :edit, :update, :destroy, :new, :create, :users, :add_user]
+
+Add new methods:
+
+def users
+  @project_users = (project.users + (User.where(tenant_id: @tenant.id, is_admin: true))) - [current_user]
+  @other_users = @tenant.users.where(tenant_id: @tenant.id, is_admin: false) - (@project_users + [current_user])
+end
+
+def add_user
+  @project_user = UserProject.new(user_id: params[:user_id], project_id: @project.id)
+  
+  respond_to do |format|
+    if @project_user.save
+      format.html { redirect_to users_tneant_project_url(id: @project.id, tenant_id: @project.tenant_id), notice: "User was added to project" })}
+    else
+      format.html { redirect_to users_teenant_project_url(id: @project.id, tenant_id: @project.tenant_id), error: "User was not added to project" }
+    end
+  end
+end
+
+Change routes:
+
+resources :tenants do
+  resources :projects do
+    get 'users', on: :members
+    put 'add_user', on: :member
+  end
+end
+
+Handle redirects in users_projects_controller and change project model (see notes for this)
+
+Add links to views to edit users on project and add lists of users added and to be added for each project.
 
 
 
